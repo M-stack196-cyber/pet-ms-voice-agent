@@ -103,18 +103,18 @@ router.post("/vapi-tools", async (req, res) => {
 
         return {
           toolCallId: toolCall.id,
-          result: output,
+          result: JSON.stringify(output),
         };
       } catch (error) {
         return {
           toolCallId: toolCall.id,
-          result: {
+          result: JSON.stringify({
             success: false,
             code: "TOOL_EXECUTION_FAILED",
             message:
               error.message ||
               "The Pet-MS tool could not be completed.",
-          },
+          }),
         };
       }
     })
