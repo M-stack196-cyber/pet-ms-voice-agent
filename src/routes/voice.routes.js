@@ -1,46 +1,38 @@
 const express = require("express");
 const facilities = require("../data/facilities");
+const { parseFlexibleDate } = require("../utils/date.utils");
 
 const router = express.Router();
 
-function createApiError(statusCode, code, message) {
+function createApiError(statusCode, code, message, details = null) {
   const error = new Error(message);
+
   error.statusCode = statusCode;
   error.code = code;
+  error.details = details;
 
   return error;
 }
 
 function parseDate(value, fieldName) {
-  if (!value || typeof value !== "string") {
-    throw createApiError(
-      400,
-      "MISSING_DATE",
-      `${fieldName} is required.`
-    );
-  }
-
-  const date = new Date(`${value}T00:00:00.000Z`);
-
-  if (Number.isNaN(date.getTime())) {
-    throw createApiError(
-      400,
-      "INVALID_DATE",
-      `${fieldName} must use YYYY-MM-DD format.`
-    );
-  }
-
-  return date;
+  return parseFlexibleDate(value, fieldName);
 }
 
 function calculateNights(dropOffDate, collectionDate) {
   const millisecondsPerDay = 24 * 60 * 60 * 1000;
-  const difference = collectionDate.getTime() - dropOffDate.getTime();
+
+  const difference =
+    collectionDate.getTime() - dropOffDate.getTime();
 
   return Math.ceil(difference / millisecondsPerDay);
 }
 
-function datesOverlap(requestStart, requestEnd, existingStart, existingEnd) {
+function datesOverlap(
+  requestStart,
+  requestEnd,
+  existingStart,
+  existingEnd
+) {
   return requestStart < existingEnd && requestEnd > existingStart;
 }
 
@@ -105,7 +97,9 @@ function getRequestContext(body) {
     );
   }
 
-  const facility = facilities.find((item) => item.id === facilityId);
+  const facility = facilities.find(
+    (item) => item.id === facilityId
+  );
 
   if (!facility) {
     throw createApiError(
@@ -115,7 +109,9 @@ function getRequestContext(body) {
     );
   }
 
-  const service = facility.services.find((item) => item.id === serviceId);
+  const service = facility.services.find(
+    (item) => item.id === serviceId
+  );
 
   if (!service) {
     throw createApiError(
@@ -153,11 +149,18 @@ function getRequestContext(body) {
     );
   }
 
-  const parsedDropOffDate = parseDate(dropOffDate, "dropOffDate");
-  const parsedCollectionDate = parseDate(
+  const dropOffDateResult = parseDate(
+    dropOffDate,
+    "dropOffDate"
+  );
+
+  const collectionDateResult = parseDate(
     collectionDate,
     "collectionDate"
   );
+
+  const parsedDropOffDate = dropOffDateResult.date;
+  const parsedCollectionDate = collectionDateResult.date;
 
   const nights = calculateNights(
     parsedDropOffDate,
@@ -168,7 +171,7 @@ function getRequestContext(body) {
     throw createApiError(
       400,
       "INVALID_DATE_RANGE",
-      "collectionDate must be after dropOffDate."
+      "The collection date must be after the drop-off date."
     );
   }
 
@@ -186,8 +189,13 @@ function getRequestContext(body) {
     accommodation,
     petType,
     petCount: parsedPetCount,
-    dropOffDate,
-    collectionDate,
+
+    dropOffDate: dropOffDateResult.normalizedDate,
+    collectionDate: collectionDateResult.normalizedDate,
+
+    dropOffDateHuman: dropOffDateResult.humanDate,
+    collectionDateHuman: collectionDateResult.humanDate,
+
     parsedDropOffDate,
     parsedCollectionDate,
     nights,
@@ -216,7 +224,9 @@ function getAccommodationAvailability(
         reservationEnd
       );
 
-      return overlaps ? total + reservation.units : total;
+      return overlaps
+        ? total + reservation.units
+        : total;
     },
     0
   );
@@ -241,7 +251,7 @@ router.get("/facilities", (req, res) => {
     petTypes: facility.petTypes,
   }));
 
-  res.status(200).json({
+  return res.status(200).json({
     success: true,
     data: result,
   });
@@ -250,7 +260,9 @@ router.get("/facilities", (req, res) => {
 router.get("/services", (req, res) => {
   const { facilityId } = req.query;
 
-  const facility = facilities.find((item) => item.id === facilityId);
+  const facility = facilities.find(
+    (item) => item.id === facilityId
+  );
 
   if (!facility) {
     return res.status(404).json({
@@ -268,14 +280,17 @@ router.get("/services", (req, res) => {
         name: facility.name,
       },
       services: facility.services,
-      accommodations: facility.accommodations.map((item) => ({
-        id: item.id,
-        name: item.name,
-        petType: item.petType,
-        capacity: item.capacity,
-        baseNightlyRate: item.baseNightlyRate,
-        additionalPetNightlyRate: item.additionalPetNightlyRate,
-      })),
+      accommodations: facility.accommodations.map(
+        (item) => ({
+          id: item.id,
+          name: item.name,
+          petType: item.petType,
+          capacity: item.capacity,
+          baseNightlyRate: item.baseNightlyRate,
+          additionalPetNightlyRate:
+            item.additionalPetNightlyRate,
+        })
+      ),
     },
   });
 });
@@ -308,7 +323,8 @@ router.post("/check-availability", (req, res) => {
           id: item.id,
           name: item.name,
           available: alternativeAvailability.available,
-          availableUnits: alternativeAvailability.availableUnits,
+          availableUnits:
+            alternativeAvailability.availableUnits,
           baseNightlyRate: item.baseNightlyRate,
         };
       })
@@ -320,30 +336,53 @@ router.post("/check-availability", (req, res) => {
         available: availability.available,
         availableUnits: availability.availableUnits,
         nights: context.nights,
+
         facility: {
           id: context.facility.id,
           name: context.facility.name,
         },
+
         service: {
           id: context.service.id,
           name: context.service.name,
         },
+
         accommodation: {
           id: context.accommodation.id,
           name: context.accommodation.name,
         },
+
+        petType: context.petType,
+        petCount: context.petCount,
+
         dropOffDate: context.dropOffDate,
         collectionDate: context.collectionDate,
+
+        dropOffDateHuman: context.dropOffDateHuman,
+        collectionDateHuman:
+          context.collectionDateHuman,
+
         alternatives,
       },
     });
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
+    const response = {
       success: false,
-      code: error.code || "AVAILABILITY_CHECK_FAILED",
+      code:
+        error.code ||
+        "AVAILABILITY_CHECK_FAILED",
       message:
-        error.message || "The availability check could not be completed.",
-    });
+        error.message ||
+        "The availability check could not be completed.",
+    };
+
+    if (error.details) {
+      response.details = error.details;
+    }
+
+    return res
+      .status(error.statusCode || 500)
+      .json(response);
   }
 });
 
@@ -366,7 +405,10 @@ router.post("/calculate-quote", (req, res) => {
       });
     }
 
-    const additionalPets = Math.max(context.petCount - 1, 0);
+    const additionalPets = Math.max(
+      context.petCount - 1,
+      0
+    );
 
     const additionalPetNightlyTotal =
       additionalPets *
@@ -378,9 +420,11 @@ router.post("/calculate-quote", (req, res) => {
       additionalPetNightlyTotal;
 
     const subtotal = nightlyTotal * context.nights;
-    const tax = subtotal * context.facility.taxRate;
+    const tax =
+      subtotal * context.facility.taxRate;
     const total = subtotal + tax;
-    const deposit = total * context.facility.depositRate;
+    const deposit =
+      total * context.facility.depositRate;
     const remainingBalance = total - deposit;
 
     return res.status(200).json({
@@ -388,49 +432,76 @@ router.post("/calculate-quote", (req, res) => {
       data: {
         available: true,
         currency: context.facility.currency,
+
         facility: {
           id: context.facility.id,
           name: context.facility.name,
         },
+
         service: {
           id: context.service.id,
           name: context.service.name,
         },
+
         accommodation: {
           id: context.accommodation.id,
           name: context.accommodation.name,
         },
+
         petType: context.petType,
         petCount: context.petCount,
+
         dropOffDate: context.dropOffDate,
         collectionDate: context.collectionDate,
+
+        dropOffDateHuman: context.dropOffDateHuman,
+        collectionDateHuman:
+          context.collectionDateHuman,
+
         nights: context.nights,
+
         priceBreakdown: {
           baseNightlyRate: roundMoney(
             context.accommodation.baseNightlyRate
           ),
+
           serviceNightlyAdjustment: roundMoney(
             context.service.nightlyAdjustment
           ),
+
           additionalPetNightlyTotal: roundMoney(
             additionalPetNightlyTotal
           ),
+
           nightlyTotal: roundMoney(nightlyTotal),
           subtotal: roundMoney(subtotal),
           tax: roundMoney(tax),
           total: roundMoney(total),
           deposit: roundMoney(deposit),
-          remainingBalance: roundMoney(remainingBalance),
+          remainingBalance: roundMoney(
+            remainingBalance
+          ),
         },
       },
     });
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
+    const response = {
       success: false,
-      code: error.code || "QUOTE_CALCULATION_FAILED",
+      code:
+        error.code ||
+        "QUOTE_CALCULATION_FAILED",
       message:
-        error.message || "The quote could not be calculated.",
-    });
+        error.message ||
+        "The quote could not be calculated.",
+    };
+
+    if (error.details) {
+      response.details = error.details;
+    }
+
+    return res
+      .status(error.statusCode || 500)
+      .json(response);
   }
 });
 
