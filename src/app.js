@@ -1,9 +1,9 @@
 const express = require("express");
 const cors = require("cors");
-
 const voiceRoutes = require("./routes/voice.routes");
 const bookingRoutes = require("./routes/booking.routes");
 const publicRoutes = require("./routes/public.routes");
+const vapiRoutes = require("./routes/vapi.routes");
 
 const app = express();
 
@@ -29,6 +29,7 @@ app.get("/api/health", (req, res) => {
 
 app.use("/api/voice", voiceRoutes);
 app.use("/api/voice", bookingRoutes);
+app.use("/api/voice", vapiRoutes);
 app.use("/", publicRoutes);
 
 app.use((req, res) => {
