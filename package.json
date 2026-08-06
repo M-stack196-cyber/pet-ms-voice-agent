@@ -4,7 +4,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test:smoke": "node tests/smoke-test.js"
   },
   "keywords": [],
   "author": "",
