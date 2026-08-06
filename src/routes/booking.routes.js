@@ -5,16 +5,28 @@ const {
   getBookingDraftByToken,
 } = require("../services/bookingDraft.service");
 
+const {
+  sendMockSms,
+} = require("../services/sms.service");
+
 const router = express.Router();
 
 router.post("/create-booking-draft", (req, res) => {
   try {
     const bookingDraft = createBookingDraft(req.body);
 
+    const smsDelivery = sendMockSms({
+      to: bookingDraft.customer.phoneNumber,
+      bookingDraft,
+    });
+
     return res.status(201).json({
       success: true,
-      message: "Booking draft created successfully.",
-      data: bookingDraft,
+      message: "Booking draft created and sandbox SMS prepared successfully.",
+      data: {
+        ...bookingDraft,
+        smsDelivery,
+      },
     });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
