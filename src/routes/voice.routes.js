@@ -36,8 +36,89 @@ function datesOverlap(
   return requestStart < existingEnd && requestEnd > existingStart;
 }
 
-function roundMoney(value) {
-  return Number(value.toFixed(2));
+/**
+ * Convert a dollar amount into integer cents.
+ * Example: 65.50 becomes 6550.
+ */
+function toCents(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    throw createApiError(
+      500,
+      "INVALID_MONEY_VALUE",
+      "An invalid monetary value was encountered."
+    );
+  }
+
+  return Math.round((numericValue + 1e-9) * 100);
+}
+
+/**
+ * Convert integer cents back into a dollar amount.
+ * Example: 6550 becomes 65.50.
+ */
+function fromCents(cents) {
+  return cents / 100;
+}
+
+/**
+ * Convert a decimal rate into a fraction.
+ *
+ * Examples:
+ * 0.3 becomes 3 / 10
+ * 0.0825 becomes 825 / 10000
+ *
+ * This avoids floating-point rounding errors when calculating
+ * tax, deposits, and remaining balances.
+ */
+function rateToFraction(rate) {
+  const numericRate = Number(rate);
+
+  if (!Number.isFinite(numericRate) || numericRate < 0) {
+    throw createApiError(
+      500,
+      "INVALID_RATE",
+      "An invalid pricing rate was encountered."
+    );
+  }
+
+  const rateText = String(numericRate);
+
+  if (rateText.includes("e")) {
+    const precision = 1_000_000;
+
+    return {
+      numerator: Math.round(numericRate * precision),
+      denominator: precision,
+    };
+  }
+
+  const [wholePart, decimalPart = ""] = rateText.split(".");
+  const denominator = 10 ** decimalPart.length;
+
+  const numerator =
+    Number(wholePart) * denominator +
+    Number(decimalPart || 0);
+
+  return {
+    numerator,
+    denominator,
+  };
+}
+
+/**
+ * Apply a percentage or decimal rate to an integer-cent amount.
+ *
+ * Example:
+ * 45465 cents × 0.30 = 13640 cents
+ */
+function applyRateToCents(amountCents, rate) {
+  const { numerator, denominator } = rateToFraction(rate);
+
+  return Math.round(
+    (amountCents * numerator) / denominator
+  );
 }
 
 function getRequestContext(body) {
@@ -279,7 +360,9 @@ router.get("/services", (req, res) => {
         id: facility.id,
         name: facility.name,
       },
+
       services: facility.services,
+
       accommodations: facility.accommodations.map(
         (item) => ({
           id: item.id,
@@ -410,22 +493,48 @@ router.post("/calculate-quote", (req, res) => {
       0
     );
 
-    const additionalPetNightlyTotal =
-      additionalPets *
-      context.accommodation.additionalPetNightlyRate;
+    /*
+     * All financial calculations are performed using
+     * integer cents to prevent floating-point errors.
+     */
+    const baseNightlyRateCents = toCents(
+      context.accommodation.baseNightlyRate
+    );
 
-    const nightlyTotal =
-      context.accommodation.baseNightlyRate +
-      context.service.nightlyAdjustment +
-      additionalPetNightlyTotal;
+    const serviceNightlyAdjustmentCents = toCents(
+      context.service.nightlyAdjustment
+    );
 
-    const subtotal = nightlyTotal * context.nights;
-    const tax =
-      subtotal * context.facility.taxRate;
-    const total = subtotal + tax;
-    const deposit =
-      total * context.facility.depositRate;
-    const remainingBalance = total - deposit;
+    const additionalPetRateCents = toCents(
+      context.accommodation.additionalPetNightlyRate
+    );
+
+    const additionalPetNightlyTotalCents =
+      additionalPets * additionalPetRateCents;
+
+    const nightlyTotalCents =
+      baseNightlyRateCents +
+      serviceNightlyAdjustmentCents +
+      additionalPetNightlyTotalCents;
+
+    const subtotalCents =
+      nightlyTotalCents * context.nights;
+
+    const taxCents = applyRateToCents(
+      subtotalCents,
+      context.facility.taxRate
+    );
+
+    const totalCents =
+      subtotalCents + taxCents;
+
+    const depositCents = applyRateToCents(
+      totalCents,
+      context.facility.depositRate
+    );
+
+    const remainingBalanceCents =
+      totalCents - depositCents;
 
     return res.status(200).json({
       success: true,
@@ -461,25 +570,40 @@ router.post("/calculate-quote", (req, res) => {
         nights: context.nights,
 
         priceBreakdown: {
-          baseNightlyRate: roundMoney(
-            context.accommodation.baseNightlyRate
+          baseNightlyRate: fromCents(
+            baseNightlyRateCents
           ),
 
-          serviceNightlyAdjustment: roundMoney(
-            context.service.nightlyAdjustment
+          serviceNightlyAdjustment: fromCents(
+            serviceNightlyAdjustmentCents
           ),
 
-          additionalPetNightlyTotal: roundMoney(
-            additionalPetNightlyTotal
+          additionalPetNightlyTotal: fromCents(
+            additionalPetNightlyTotalCents
           ),
 
-          nightlyTotal: roundMoney(nightlyTotal),
-          subtotal: roundMoney(subtotal),
-          tax: roundMoney(tax),
-          total: roundMoney(total),
-          deposit: roundMoney(deposit),
-          remainingBalance: roundMoney(
-            remainingBalance
+          nightlyTotal: fromCents(
+            nightlyTotalCents
+          ),
+
+          subtotal: fromCents(
+            subtotalCents
+          ),
+
+          tax: fromCents(
+            taxCents
+          ),
+
+          total: fromCents(
+            totalCents
+          ),
+
+          deposit: fromCents(
+            depositCents
+          ),
+
+          remainingBalance: fromCents(
+            remainingBalanceCents
           ),
         },
       },
