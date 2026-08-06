@@ -3,6 +3,8 @@ const express = require("express");
 const {
   createBookingDraft,
   getBookingDraftByToken,
+  updateBookingDraft,
+  cancelBookingDraft,
 } = require("../services/bookingDraft.service");
 
 const {
@@ -54,5 +56,62 @@ router.get("/booking-draft/:token", (req, res) => {
     data: bookingDraft,
   });
 });
+
+
+router.patch("/booking-drafts/:id", (req, res) => {
+  try {
+    const bookingDraft = updateBookingDraft(
+      req.params.id,
+      req.body || {}
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking draft updated successfully.",
+      data: bookingDraft,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      code:
+        error.code ||
+        "BOOKING_DRAFT_UPDATE_FAILED",
+      message:
+        error.message ||
+        "The booking draft could not be updated.",
+    });
+  }
+});
+
+router.post(
+  "/booking-drafts/:id/cancel",
+  (req, res) => {
+    try {
+      const bookingDraft = cancelBookingDraft(
+        req.params.id,
+        (req.body || {}).reason
+      );
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Booking draft cancelled successfully.",
+        data: bookingDraft,
+      });
+    } catch (error) {
+      return res
+        .status(error.statusCode || 500)
+        .json({
+          success: false,
+          code:
+            error.code ||
+            "BOOKING_DRAFT_CANCELLATION_FAILED",
+          message:
+            error.message ||
+            "The booking draft could not be cancelled.",
+        });
+    }
+  }
+);
 
 module.exports = router;

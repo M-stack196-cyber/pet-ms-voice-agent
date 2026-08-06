@@ -519,8 +519,190 @@ function completeBookingDraft(token, details) {
   return draft;
 }
 
+
+function getBookingDraftById(id) {
+  const normalizedId = String(id || "")
+    .trim()
+    .toUpperCase();
+
+  return bookingDrafts.find(
+    (draft) => draft.id === normalizedId
+  );
+}
+
+function updateBookingDraft(id, updates = {}) {
+  const draft = getBookingDraftById(id);
+
+  if (!draft) {
+    throw createError(
+      404,
+      "BOOKING_DRAFT_NOT_FOUND",
+      "The booking draft was not found."
+    );
+  }
+
+  if (
+    draft.status === "draft_created" &&
+    new Date(draft.expiresAt) <= new Date()
+  ) {
+    draft.status = "expired";
+
+    throw createError(
+      410,
+      "BOOKING_DRAFT_EXPIRED",
+      "The booking draft has expired."
+    );
+  }
+
+  const blockedStatuses = [
+    "cancelled",
+    "expired",
+    "form_completed",
+    "completed",
+    "replaced",
+  ];
+
+  if (blockedStatuses.includes(draft.status)) {
+    throw createError(
+      409,
+      "BOOKING_DRAFT_NOT_EDITABLE",
+      `A booking draft with status ${draft.status} cannot be updated.`
+    );
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      updates,
+      "customerName"
+    )
+  ) {
+    const customerName = String(
+      updates.customerName || ""
+    ).trim();
+
+    if (!customerName) {
+      throw createError(
+        400,
+        "CUSTOMER_NAME_REQUIRED",
+        "customerName cannot be empty."
+      );
+    }
+
+    draft.customer.name = customerName;
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      updates,
+      "phoneNumber"
+    )
+  ) {
+    draft.customer.phoneNumber =
+      normalizePhoneNumber(updates.phoneNumber);
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      updates,
+      "email"
+    )
+  ) {
+    const email = String(
+      updates.email || ""
+    ).trim();
+
+    draft.customer.email = email || null;
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      updates,
+      "petNames"
+    )
+  ) {
+    const petNames = normalizePetNames(
+      updates.petNames
+    );
+
+    if (petNames.length !== draft.pets.count) {
+      throw createError(
+        400,
+        "PET_NAMES_COUNT_MISMATCH",
+        `Exactly ${draft.pets.count} pet name(s) are required.`
+      );
+    }
+
+    draft.pets.names = petNames;
+  }
+
+  if (updates.status === "replaced") {
+    draft.status = "replaced";
+    draft.replacedAt = new Date().toISOString();
+
+    draft.replacedByDraftId =
+      updates.replacedByDraftId
+        ? String(updates.replacedByDraftId)
+            .trim()
+            .toUpperCase()
+        : null;
+  }
+
+  draft.updatedAt = new Date().toISOString();
+
+  return draft;
+}
+
+function cancelBookingDraft(id, reason = "") {
+  const draft = getBookingDraftById(id);
+
+  if (!draft) {
+    throw createError(
+      404,
+      "BOOKING_DRAFT_NOT_FOUND",
+      "The booking draft was not found."
+    );
+  }
+
+  if (draft.status === "cancelled") {
+    return draft;
+  }
+
+  if (
+    ["form_completed", "completed", "replaced"]
+      .includes(draft.status)
+  ) {
+    throw createError(
+      409,
+      "BOOKING_DRAFT_NOT_CANCELLABLE",
+      `A booking draft with status ${draft.status} cannot be cancelled.`
+    );
+  }
+
+  if (new Date(draft.expiresAt) <= new Date()) {
+    draft.status = "expired";
+
+    throw createError(
+      410,
+      "BOOKING_DRAFT_EXPIRED",
+      "The booking draft has expired."
+    );
+  }
+
+  draft.status = "cancelled";
+  draft.cancellationReason =
+    String(reason || "").trim() || null;
+
+  draft.cancelledAt = new Date().toISOString();
+  draft.updatedAt = draft.cancelledAt;
+
+  return draft;
+}
+
 module.exports = {
   createBookingDraft,
   getBookingDraftByToken,
+  getBookingDraftById,
+  updateBookingDraft,
+  cancelBookingDraft,
   completeBookingDraft,
 };
