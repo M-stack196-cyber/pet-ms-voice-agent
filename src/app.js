@@ -1,11 +1,46 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const { rateLimit } = require("express-rate-limit");
 const voiceRoutes = require("./routes/voice.routes");
 const bookingRoutes = require("./routes/booking.routes");
 const publicRoutes = require("./routes/public.routes");
 const vapiRoutes = require("./routes/vapi.routes");
 
 const app = express();
+
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
+app.use(
+  helmet({
+    // The current secure booking page uses inline styling.
+    contentSecurityPolicy: false,
+  })
+);
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 200,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    code: "RATE_LIMIT_EXCEEDED",
+    message: "Too many requests. Please try again later.",
+  },
+});
+
+const bookingFormLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: "Too many booking-form requests. Please try again later.",
+});
+
+app.use("/api", apiLimiter);
+app.use("/complete-booking", bookingFormLimiter);
 
 app.use(cors());
 app.use(express.json());
