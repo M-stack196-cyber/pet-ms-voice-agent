@@ -1,6 +1,38 @@
 const express = require("express");
+const crypto = require("crypto");
 
 const router = express.Router();
+
+function secretsMatch(providedValue, expectedValue) {
+  const provided = Buffer.from(String(providedValue || ""));
+  const expected = Buffer.from(String(expectedValue || ""));
+
+  return (
+    provided.length === expected.length &&
+    crypto.timingSafeEqual(provided, expected)
+  );
+}
+
+function requireVoiceApiSecret(req, res, next) {
+  const expectedSecret = process.env.VOICE_API_SECRET;
+
+  // Authentication remains disabled until a secret is configured.
+  if (!expectedSecret) {
+    return next();
+  }
+
+  const providedSecret = req.get("x-voice-api-secret");
+
+  if (!secretsMatch(providedSecret, expectedSecret)) {
+    return res.status(401).json({
+      success: false,
+      code: "INVALID_VOICE_API_SECRET",
+      message: "The Vapi webhook request is unauthorized.",
+    });
+  }
+
+  return next();
+}
 
 function normalizeArguments(value) {
   if (!value) {
@@ -142,7 +174,10 @@ async function executeTool(toolName, argumentsValue) {
   }
 }
 
-router.post("/vapi-tools", async (req, res) => {
+router.post(
+  "/vapi-tools",
+  requireVoiceApiSecret,
+  async (req, res) => {
   const message = req.body?.message;
   const toolCalls = getToolCalls(message);
 
@@ -197,9 +232,10 @@ router.post("/vapi-tools", async (req, res) => {
     })
   );
 
-  return res.status(200).json({
-    results,
-  });
-});
+    return res.status(200).json({
+      results,
+    });
+  }
+);
 
 module.exports = router;
