@@ -504,17 +504,74 @@ function completeBookingDraft(token, details) {
     );
   }
 
+  if (draft.status === "form_completed") {
+    throw createError(
+      409,
+      "BOOKING_DRAFT_ALREADY_COMPLETED",
+      "This booking form has already been submitted."
+    );
+  }
+
+  if (
+    ["cancelled", "replaced", "completed"]
+      .includes(draft.status)
+  ) {
+    throw createError(
+      409,
+      "BOOKING_DRAFT_NOT_COMPLETABLE",
+      `A booking draft with status ${draft.status} cannot be completed.`
+    );
+  }
+
+  if (draft.status !== "draft_created") {
+    throw createError(
+      409,
+      "BOOKING_DRAFT_NOT_COMPLETABLE",
+      "This booking draft cannot be completed."
+    );
+  }
+
+  const breed = String(
+    details.breed || ""
+  ).trim();
+
+  const age = String(
+    details.age || ""
+  ).trim();
+
+  if (!breed) {
+    throw createError(
+      400,
+      "PET_BREED_REQUIRED",
+      "Pet breed is required."
+    );
+  }
+
+  if (!age) {
+    throw createError(
+      400,
+      "PET_AGE_REQUIRED",
+      "Pet age is required."
+    );
+  }
+
   draft.petDetails = {
-    breed: String(details.breed || "").trim(),
-    age: String(details.age || "").trim(),
+    breed,
+    age,
+
     feedingInstructions: String(
       details.feedingInstructions || ""
     ).trim(),
-    specialNotes: String(details.specialNotes || "").trim(),
+
+    specialNotes: String(
+      details.specialNotes || ""
+    ).trim(),
   };
 
   draft.status = "form_completed";
   draft.completedAt = new Date().toISOString();
+  draft.tokenUsedAt = draft.completedAt;
+  draft.updatedAt = draft.completedAt;
 
   return draft;
 }
