@@ -15,6 +15,54 @@ function roundMoney(value) {
   return Number(value.toFixed(2));
 }
 
+
+function toCents(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    throw createError(
+      500,
+      "INVALID_MONEY_VALUE",
+      "An invalid monetary value was encountered."
+    );
+  }
+
+  return Math.round((numericValue + 1e-9) * 100);
+}
+
+function fromCents(cents) {
+  return cents / 100;
+}
+
+function applyRateToCents(amountCents, rate) {
+  const numericRate = Number(rate);
+
+  if (!Number.isFinite(numericRate) || numericRate < 0) {
+    throw createError(
+      500,
+      "INVALID_RATE",
+      "An invalid pricing rate was encountered."
+    );
+  }
+
+  const rateText = String(numericRate);
+
+  if (rateText.includes("e")) {
+    return Math.round(amountCents * numericRate);
+  }
+
+  const [wholePart, decimalPart = ""] = rateText.split(".");
+  const denominator = 10 ** decimalPart.length;
+
+  const numerator =
+    Number(wholePart) * denominator +
+    Number(decimalPart || 0);
+
+  return Math.round(
+    (amountCents * numerator) / denominator
+  );
+}
+
 function parseDate(value, fieldName) {
   if (!value || typeof value !== "string") {
     throw createError(400, "MISSING_DATE", `${fieldName} is required.`);
@@ -35,6 +83,45 @@ function parseDate(value, fieldName) {
 
 function datesOverlap(requestStart, requestEnd, existingStart, existingEnd) {
   return requestStart < existingEnd && requestEnd > existingStart;
+}
+
+function normalizePhoneNumber(value) {
+  const rawValue = String(value || "").trim();
+
+  if (!rawValue) {
+    throw createError(
+      400,
+      "PHONE_NUMBER_REQUIRED",
+      "phoneNumber is required."
+    );
+  }
+
+  let phoneNumber = rawValue.replace(/[\s().-]/g, "");
+
+  if (phoneNumber.startsWith("00")) {
+    phoneNumber = `+${phoneNumber.slice(2)}`;
+  }
+
+  // Pakistani local mobile number: 03287207195
+  if (/^03\d{9}$/.test(phoneNumber)) {
+    return `+92${phoneNumber.slice(1)}`;
+  }
+
+  // Pakistani international number without plus: 923287207195
+  if (/^923\d{9}$/.test(phoneNumber)) {
+    return `+${phoneNumber}`;
+  }
+
+  // Valid international E.164 number
+  if (/^\+[1-9]\d{7,14}$/.test(phoneNumber)) {
+    return phoneNumber;
+  }
+
+  throw createError(
+    400,
+    "INVALID_PHONE_NUMBER",
+    "Provide a valid phone number. Pakistani numbers may use 03XXXXXXXXX or +923XXXXXXXXX."
+  );
 }
 
 function normalizePetNames(petNames) {
@@ -232,45 +319,76 @@ function getAvailableUnits(context) {
 }
 
 function calculateQuote(context) {
-  const additionalPets = Math.max(context.petCount - 1, 0);
+  const additionalPets = Math.max(
+    context.petCount - 1,
+    0
+  );
 
-  const additionalPetNightlyTotal =
-    additionalPets *
-    context.accommodation.additionalPetNightlyRate;
+  const baseNightlyRateCents = toCents(
+    context.accommodation.baseNightlyRate
+  );
 
-  const nightlyTotal =
-    context.accommodation.baseNightlyRate +
-    context.service.nightlyAdjustment +
-    additionalPetNightlyTotal;
+  const serviceNightlyAdjustmentCents = toCents(
+    context.service.nightlyAdjustment
+  );
 
-  const subtotal = nightlyTotal * context.nights;
-  const tax = subtotal * context.facility.taxRate;
-  const total = subtotal + tax;
-  const deposit = total * context.facility.depositRate;
+  const additionalPetRateCents = toCents(
+    context.accommodation.additionalPetNightlyRate
+  );
+
+  const additionalPetNightlyTotalCents =
+    additionalPets * additionalPetRateCents;
+
+  const nightlyTotalCents =
+    baseNightlyRateCents +
+    serviceNightlyAdjustmentCents +
+    additionalPetNightlyTotalCents;
+
+  const subtotalCents =
+    nightlyTotalCents * context.nights;
+
+  const taxCents = applyRateToCents(
+    subtotalCents,
+    context.facility.taxRate
+  );
+
+  const totalCents =
+    subtotalCents + taxCents;
+
+  const depositCents = applyRateToCents(
+    totalCents,
+    context.facility.depositRate
+  );
+
+  const remainingBalanceCents =
+    totalCents - depositCents;
 
   return {
     currency: context.facility.currency,
-    baseNightlyRate: roundMoney(
-      context.accommodation.baseNightlyRate
+    baseNightlyRate: fromCents(baseNightlyRateCents),
+    serviceNightlyAdjustment: fromCents(
+      serviceNightlyAdjustmentCents
     ),
-    serviceNightlyAdjustment: roundMoney(
-      context.service.nightlyAdjustment
+    additionalPetNightlyTotal: fromCents(
+      additionalPetNightlyTotalCents
     ),
-    additionalPetNightlyTotal: roundMoney(
-      additionalPetNightlyTotal
+    nightlyTotal: fromCents(nightlyTotalCents),
+    subtotal: fromCents(subtotalCents),
+    tax: fromCents(taxCents),
+    total: fromCents(totalCents),
+    deposit: fromCents(depositCents),
+    remainingBalance: fromCents(
+      remainingBalanceCents
     ),
-    nightlyTotal: roundMoney(nightlyTotal),
-    subtotal: roundMoney(subtotal),
-    tax: roundMoney(tax),
-    total: roundMoney(total),
-    deposit: roundMoney(deposit),
-    remainingBalance: roundMoney(total - deposit),
   };
 }
 
 function createBookingDraft(payload) {
   const customerName = String(payload.customerName || "").trim();
-  const phoneNumber = String(payload.phoneNumber || "").trim();
+  const phoneNumber = normalizePhoneNumber(
+    payload.phoneNumber
+  );
+
   const email = String(payload.email || "").trim();
 
   if (!customerName) {
@@ -278,22 +396,6 @@ function createBookingDraft(payload) {
       400,
       "CUSTOMER_NAME_REQUIRED",
       "customerName is required."
-    );
-  }
-
-  if (!phoneNumber) {
-    throw createError(
-      400,
-      "PHONE_NUMBER_REQUIRED",
-      "phoneNumber is required."
-    );
-  }
-
-  if (!/^\+?[0-9\s()-]{7,20}$/.test(phoneNumber)) {
-    throw createError(
-      400,
-      "INVALID_PHONE_NUMBER",
-      "Provide a valid phone number."
     );
   }
 
