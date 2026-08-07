@@ -1,9 +1,11 @@
 const crypto = require("crypto");
 
 const facilities = require("../data/facilities");
-const bookingDrafts = require("../data/bookings");
 const {
   insertDraft,
+  findDraftByToken,
+  findDraftById,
+  saveDraft,
   countActiveHolds,
 } = require("./bookingDraft.repository");
 
@@ -454,19 +456,21 @@ async function createBookingDraft(payload) {
 
   await insertDraft(bookingDraft);
 
-  // Keep the temporary in-memory copy until the remaining
-  // booking operations are migrated to PostgreSQL.
-  bookingDrafts.push(bookingDraft);
-
   return bookingDraft;
 }
 
-function getBookingDraftByToken(token) {
-  return bookingDrafts.find((draft) => draft.token === token);
+async function getBookingDraftByToken(token) {
+  const normalizedToken = String(token || "").trim();
+
+  if (!normalizedToken) {
+    return null;
+  }
+
+  return findDraftByToken(normalizedToken);
 }
 
-function completeBookingDraft(token, details) {
-  const draft = getBookingDraftByToken(token);
+async function completeBookingDraft(token, details) {
+  const draft = await getBookingDraftByToken(token);
 
   if (!draft) {
     throw createError(
@@ -478,6 +482,9 @@ function completeBookingDraft(token, details) {
 
   if (new Date(draft.expiresAt) <= new Date()) {
     draft.status = "expired";
+    draft.updatedAt = new Date().toISOString();
+
+    await saveDraft(draft);
 
     throw createError(
       410,
@@ -495,8 +502,7 @@ function completeBookingDraft(token, details) {
   }
 
   if (
-    ["cancelled", "replaced", "completed"]
-      .includes(draft.status)
+    ["cancelled", "replaced", "completed"].includes(draft.status)
   ) {
     throw createError(
       409,
@@ -513,13 +519,8 @@ function completeBookingDraft(token, details) {
     );
   }
 
-  const breed = String(
-    details.breed || ""
-  ).trim();
-
-  const age = String(
-    details.age || ""
-  ).trim();
+  const breed = String(details.breed || "").trim();
+  const age = String(details.age || "").trim();
 
   if (!breed) {
     throw createError(
@@ -540,11 +541,9 @@ function completeBookingDraft(token, details) {
   draft.petDetails = {
     breed,
     age,
-
     feedingInstructions: String(
       details.feedingInstructions || ""
     ).trim(),
-
     specialNotes: String(
       details.specialNotes || ""
     ).trim(),
@@ -555,22 +554,25 @@ function completeBookingDraft(token, details) {
   draft.tokenUsedAt = draft.completedAt;
   draft.updatedAt = draft.completedAt;
 
+  await saveDraft(draft);
+
   return draft;
 }
 
-
-function getBookingDraftById(id) {
+async function getBookingDraftById(id) {
   const normalizedId = String(id || "")
     .trim()
     .toUpperCase();
 
-  return bookingDrafts.find(
-    (draft) => draft.id === normalizedId
-  );
+  if (!normalizedId) {
+    return null;
+  }
+
+  return findDraftById(normalizedId);
 }
 
-function updateBookingDraft(id, updates = {}) {
-  const draft = getBookingDraftById(id);
+async function updateBookingDraft(id, updates = {}) {
+  const draft = await getBookingDraftById(id);
 
   if (!draft) {
     throw createError(
@@ -585,6 +587,9 @@ function updateBookingDraft(id, updates = {}) {
     new Date(draft.expiresAt) <= new Date()
   ) {
     draft.status = "expired";
+    draft.updatedAt = new Date().toISOString();
+
+    await saveDraft(draft);
 
     throw createError(
       410,
@@ -646,10 +651,7 @@ function updateBookingDraft(id, updates = {}) {
       "email"
     )
   ) {
-    const email = String(
-      updates.email || ""
-    ).trim();
-
+    const email = String(updates.email || "").trim();
     draft.customer.email = email || null;
   }
 
@@ -659,9 +661,7 @@ function updateBookingDraft(id, updates = {}) {
       "petNames"
     )
   ) {
-    const petNames = normalizePetNames(
-      updates.petNames
-    );
+    const petNames = normalizePetNames(updates.petNames);
 
     if (petNames.length !== draft.pets.count) {
       throw createError(
@@ -688,11 +688,13 @@ function updateBookingDraft(id, updates = {}) {
 
   draft.updatedAt = new Date().toISOString();
 
+  await saveDraft(draft);
+
   return draft;
 }
 
-function cancelBookingDraft(id, reason = "") {
-  const draft = getBookingDraftById(id);
+async function cancelBookingDraft(id, reason = "") {
+  const draft = await getBookingDraftById(id);
 
   if (!draft) {
     throw createError(
@@ -707,8 +709,9 @@ function cancelBookingDraft(id, reason = "") {
   }
 
   if (
-    ["form_completed", "completed", "replaced"]
-      .includes(draft.status)
+    ["form_completed", "completed", "replaced"].includes(
+      draft.status
+    )
   ) {
     throw createError(
       409,
@@ -719,6 +722,9 @@ function cancelBookingDraft(id, reason = "") {
 
   if (new Date(draft.expiresAt) <= new Date()) {
     draft.status = "expired";
+    draft.updatedAt = new Date().toISOString();
+
+    await saveDraft(draft);
 
     throw createError(
       410,
@@ -733,6 +739,8 @@ function cancelBookingDraft(id, reason = "") {
 
   draft.cancelledAt = new Date().toISOString();
   draft.updatedAt = draft.cancelledAt;
+
+  await saveDraft(draft);
 
   return draft;
 }

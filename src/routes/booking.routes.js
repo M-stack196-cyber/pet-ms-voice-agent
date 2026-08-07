@@ -40,8 +40,8 @@ router.post("/create-booking-draft", async (req, res) => {
   }
 });
 
-router.get("/booking-draft/:token", (req, res) => {
-  const bookingDraft = getBookingDraftByToken(req.params.token);
+router.get("/booking-draft/:token", async (req, res) => {
+  const bookingDraft = await getBookingDraftByToken(req.params.token);
 
   if (!bookingDraft) {
     return res.status(404).json({
@@ -58,9 +58,9 @@ router.get("/booking-draft/:token", (req, res) => {
 });
 
 
-router.patch("/booking-drafts/:id", (req, res) => {
+router.patch("/booking-drafts/:id", async (req, res) => {
   try {
-    const bookingDraft = updateBookingDraft(
+    const bookingDraft = await updateBookingDraft(
       req.params.id,
       req.body || {}
     );
@@ -85,9 +85,9 @@ router.patch("/booking-drafts/:id", (req, res) => {
 
 router.post(
   "/booking-drafts/:id/cancel",
-  (req, res) => {
+  async (req, res) => {
     try {
-      const bookingDraft = cancelBookingDraft(
+      const bookingDraft = await cancelBookingDraft(
         req.params.id,
         (req.body || {}).reason
       );

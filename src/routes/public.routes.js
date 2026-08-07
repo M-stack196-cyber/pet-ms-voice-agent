@@ -116,8 +116,8 @@ function renderPage(title, body) {
   `;
 }
 
-router.get("/complete-booking/:token", (req, res) => {
-  const draft = getBookingDraftByToken(req.params.token);
+router.get("/complete-booking/:token", async (req, res) => {
+  const draft = await getBookingDraftByToken(req.params.token);
 
   if (!draft) {
     return res.status(404).send(
@@ -258,9 +258,9 @@ router.get("/complete-booking/:token", (req, res) => {
   );
 });
 
-router.post("/complete-booking/:token", (req, res) => {
+router.post("/complete-booking/:token", async (req, res) => {
   try {
-    const draft = completeBookingDraft(
+    const draft = await completeBookingDraft(
       req.params.token,
       req.body
     );
