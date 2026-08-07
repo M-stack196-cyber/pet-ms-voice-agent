@@ -117,8 +117,14 @@ function getToolCalls(message) {
 async function callLocalVoiceApi(endpoint, body) {
   const port = Number(process.env.PORT) || 3000;
 
+  const baseUrl =
+    process.env.APP_BASE_URL ||
+    (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : `http://127.0.0.1:${port}`);
+
   const response = await fetch(
-    `http://127.0.0.1:${port}/api/voice${endpoint}`,
+    `${baseUrl}/api/voice${endpoint}`,
     {
       method: "POST",
       headers: {
