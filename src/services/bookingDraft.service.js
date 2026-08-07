@@ -2,6 +2,10 @@ const crypto = require("crypto");
 
 const facilities = require("../data/facilities");
 const bookingDrafts = require("../data/bookings");
+const {
+  insertDraft,
+  countActiveHolds,
+} = require("./bookingDraft.repository");
 
 function createError(statusCode, code, message) {
   const error = new Error(message);
@@ -253,7 +257,7 @@ function getBookingContext(payload) {
   };
 }
 
-function getAvailableUnits(context) {
+async function getAvailableUnits(context) {
   const staticReservedUnits =
     context.accommodation.reservations.reduce(
       (total, reservation) => {
@@ -277,38 +281,12 @@ function getAvailableUnits(context) {
       0
     );
 
-  const now = new Date();
-
-  const activeVoiceHolds = bookingDrafts.filter((draft) => {
-    if (
-      draft.status !== "draft_created" ||
-      new Date(draft.expiresAt) <= now
-    ) {
-      return false;
-    }
-
-    if (
-      draft.facility.id !== context.facility.id ||
-      draft.accommodation.id !== context.accommodation.id
-    ) {
-      return false;
-    }
-
-    const draftStart = new Date(
-      `${draft.stay.dropOffDate}T00:00:00.000Z`
-    );
-
-    const draftEnd = new Date(
-      `${draft.stay.collectionDate}T00:00:00.000Z`
-    );
-
-    return datesOverlap(
-      context.parsedDropOffDate,
-      context.parsedCollectionDate,
-      draftStart,
-      draftEnd
-    );
-  }).length;
+  const activeVoiceHolds = await countActiveHolds({
+    facilityId: context.facility.id,
+    accommodationId: context.accommodation.id,
+    dropOffDate: context.dropOffDate,
+    collectionDate: context.collectionDate,
+  });
 
   return Math.max(
     context.accommodation.capacity -
@@ -383,7 +361,7 @@ function calculateQuote(context) {
   };
 }
 
-function createBookingDraft(payload) {
+async function createBookingDraft(payload) {
   const customerName = String(payload.customerName || "").trim();
   const phoneNumber = normalizePhoneNumber(
     payload.phoneNumber
@@ -400,7 +378,7 @@ function createBookingDraft(payload) {
   }
 
   const context = getBookingContext(payload);
-  const availableUnits = getAvailableUnits(context);
+  const availableUnits = await getAvailableUnits(context);
 
   if (availableUnits < 1) {
     throw createError(
@@ -474,6 +452,10 @@ function createBookingDraft(payload) {
     completionUrl: `${publicBaseUrl}/complete-booking/${token}`,
   };
 
+  await insertDraft(bookingDraft);
+
+  // Keep the temporary in-memory copy until the remaining
+  // booking operations are migrated to PostgreSQL.
   bookingDrafts.push(bookingDraft);
 
   return bookingDraft;

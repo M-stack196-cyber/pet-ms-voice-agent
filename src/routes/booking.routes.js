@@ -13,9 +13,9 @@ const {
 
 const router = express.Router();
 
-router.post("/create-booking-draft", (req, res) => {
+router.post("/create-booking-draft", async (req, res) => {
   try {
-    const bookingDraft = createBookingDraft(req.body);
+    const bookingDraft = await createBookingDraft(req.body);
 
     const smsDelivery = sendMockSms({
       to: bookingDraft.customer.phoneNumber,
