@@ -1,6 +1,28 @@
 const assert = require("node:assert/strict");
+require("dotenv").config();
+
+const pool = require("../src/db");
 
 const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+const createdDraftIds = [];
+
+async function cleanupTestDrafts() {
+  if (createdDraftIds.length === 0) {
+    return;
+  }
+
+  const result = await pool.query(
+    `
+      DELETE FROM booking_drafts
+      WHERE id = ANY($1::text[])
+    `,
+    [createdDraftIds]
+  );
+
+  console.log(
+    `✓ cleaned ${result.rowCount} smoke-test database record(s)`
+  );
+}
 
 async function jsonRequest(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -76,6 +98,7 @@ async function run() {
 
   const firstDraftId = firstDraft.body.data.id;
   assert.ok(firstDraftId);
+  createdDraftIds.push(firstDraftId);
   checks.push("booking draft creation");
 
   const updated = await jsonRequest(
@@ -130,6 +153,10 @@ async function run() {
   assert.equal(secondDraft.response.status, 201);
   assert.equal(secondDraft.body.success, true);
 
+  const secondDraftId = secondDraft.body.data.id;
+  assert.ok(secondDraftId);
+  createdDraftIds.push(secondDraftId);
+
   const token = secondDraft.body.data.token;
   assert.ok(token);
 
@@ -178,8 +205,22 @@ async function run() {
   checks.forEach((check) => console.log(`✓ ${check}`));
 }
 
-run().catch((error) => {
-  console.error("\nPet-MS smoke tests failed:");
-  console.error(error);
-  process.exit(1);
-});
+run()
+  .catch((error) => {
+    console.error("\nPet-MS smoke tests failed:");
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    try {
+      await cleanupTestDrafts();
+    } catch (error) {
+      console.error(
+        "Smoke-test cleanup failed:",
+        error.message
+      );
+      process.exitCode = 1;
+    } finally {
+      await pool.end();
+    }
+  });
